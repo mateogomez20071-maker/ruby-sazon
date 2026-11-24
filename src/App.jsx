@@ -21,7 +21,8 @@ import {
   FaLock,
   FaEnvelope,
   FaPhone,
-  FaStickyNote
+  FaStickyNote,
+  FaFilePdf
 } from "react-icons/fa";
 
 import {
@@ -36,11 +37,24 @@ import {
   getMenus,
   saveMenu,
   deleteMenu,
+  clearMenuPdf,
+  addMenuImage,
+  removeMenuImage,
   getBookings,
   createBooking,
   updateBooking,
   deleteBooking
 } from "./services/firestore";
+
+import AdminMenuExtras from "./components/AdminMenuExtras";
+import MenuBuilder from "./components/MenuBuilder";
+import MenuGallery from "./components/MenuGallery";
+import {
+  categoriesToItems,
+  emptyCategories,
+  isCustomCategory,
+  normalizeCategories
+} from "./utils/menu";
 
 import "./App.css";
 
@@ -53,6 +67,13 @@ const APP_CONFIG = {
   whatsapp:
     import.meta.env.VITE_WHATSAPP_NUMBER || "573001234567"
 };
+
+/* Rutas que solo puede ver una sesión autenticada de Firebase. */
+const PROTECTED_ROUTES = [
+  "/admin",
+  "/admin/menu",
+  "/admin/reservas"
+];
 
 /* =========================================================
    HELPERS
@@ -138,6 +159,22 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  /*
+   * Redirección real a /login cuando no hay sesión.
+   * Se usa el estado de Firebase Auth (observeAuth), nunca
+   * localStorage, para decidir si la ruta es accesible.
+   */
+  useEffect(() => {
+    if (
+      !loadingAuth &&
+      !user &&
+      PROTECTED_ROUTES.includes(route)
+    ) {
+      window.history.replaceState({}, "", "/login");
+      setRoute("/login");
+    }
+  }, [loadingAuth, user, route]);
+
   useEffect(() => {
     const handlePopState = () => {
       setRoute(window.location.pathname);
@@ -182,18 +219,12 @@ export default function App() {
      RUTAS PROTEGIDAS
   ======================================================= */
 
-  const protectedRoutes = [
-    "/admin",
-    "/admin/menu",
-    "/admin/reservas"
-  ];
-
-  if (protectedRoutes.includes(route) && !user) {
+  if (PROTECTED_ROUTES.includes(route) && !user) {
     return (
-      <Login
-        navigate={navigate}
-        onLogin={() => navigate("/admin")}
-      />
+      <div className="app-loading">
+        <div className="loading-spinner"></div>
+        <p>Redirigiendo al inicio de sesión...</p>
+      </div>
     );
   }
 
@@ -211,11 +242,11 @@ export default function App() {
   }
 
   if (route === "/menu") {
-    return <DailyMenu navigate={navigate} />;
+    return <DailyMenu navigate={navigate} user={user} />;
   }
 
   if (route === "/reservar") {
-    return <Booking navigate={navigate} />;
+    return <Booking navigate={navigate} user={user} />;
   }
 
   if (route === "/admin/menu") {
@@ -318,23 +349,15 @@ function Header({ navigate, user }) {
             Reservar
           </button>
 
-          {user ? (
-            <button
-              className="nav-admin-button"
-              onClick={() => go("/admin")}
-            >
-              <FaUser />
-              Panel
-            </button>
-          ) : (
-            <button
-              className="nav-admin-button"
-              onClick={() => go("/login")}
-            >
-              <FaUser />
-              Emprendedora
-            </button>
-          )}
+          <button
+            className="nav-admin-button"
+            onClick={() =>
+              go(user ? "/admin" : "/login")
+            }
+          >
+            <FaUser />
+            Panel
+          </button>
         </nav>
       </div>
     </header>
@@ -461,9 +484,12 @@ function InfoCard({ icon, title, text }) {
    MENÚ DEL DÍA
 ========================================================= */
 
-function DailyMenu({ navigate }) {
+function DailyMenu({ navigate, user }) {
   const [menu, setMenu] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  const [selectedDate, setSelectedDate] =
+    useState(getToday());
 
   /*
    * Para mostrar el menú público necesitamos saber
@@ -478,34 +504,51 @@ function DailyMenu({ navigate }) {
     import.meta.env.VITE_OWNER_ID || "";
 
   useEffect(() => {
+    let active = true;
+
     async function loadMenu() {
       if (!ownerId) {
+        setMenu(null);
         setLoading(false);
         return;
       }
 
-      try {
-        const today = getToday();
+      setLoading(true);
 
+      try {
         const menus = await getMenus(ownerId);
 
-        setMenu(menus[today] || null);
+        if (active) {
+          setMenu(
+            menus[selectedDate] || null
+          );
+        }
       } catch (error) {
         console.error(
           "Error cargando menú:",
           error
         );
+
+        if (active) {
+          setMenu(null);
+        }
       } finally {
-        setLoading(false);
+        if (active) {
+          setLoading(false);
+        }
       }
     }
 
     loadMenu();
-  }, [ownerId]);
+
+    return () => {
+      active = false;
+    };
+  }, [ownerId, selectedDate]);
 
   return (
     <div className="page">
-      <Header navigate={navigate} />
+      <Header navigate={navigate} user={user} />
 
       <main className="content-page">
         <div className="page-title">
@@ -526,6 +569,31 @@ function DailyMenu({ navigate }) {
           </p>
         </div>
 
+        <div className="public-date-filter">
+          <label>
+            <FaCalendarAlt />
+            <span>Fecha del menú</span>
+          </label>
+
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(event) =>
+              setSelectedDate(event.target.value)
+            }
+          />
+
+          <button
+            type="button"
+            className="text-button"
+            onClick={() =>
+              setSelectedDate(getToday())
+            }
+          >
+            Ver el de hoy
+          </button>
+        </div>
+
         {loading ? (
           <Loading />
         ) : !ownerId ? (
@@ -537,7 +605,11 @@ function DailyMenu({ navigate }) {
         ) : !menu ? (
           <EmptyState
             icon={<FaUtensils />}
-            title="Hoy no hay menú disponible"
+            title={
+              selectedDate === getToday()
+                ? "No hay un menú publicado para hoy."
+                : "No hay un menú publicado para esta fecha."
+            }
             text="Puedes volver más tarde o reservar un evento."
             action={
               <button
@@ -562,38 +634,30 @@ function DailyMenu({ navigate }) {
                 )}
               </div>
 
-              <div className="menu-hours">
-                <FaClock />
-                Disponible hasta{" "}
-                {menu.availableUntil || "15:00"}
+              <div className="menu-header-actions">
+                <div className="menu-hours">
+                  <FaClock />
+                  Disponible hasta{" "}
+                  {menu.availableUntil || "15:00"}
+                </div>
+
+                {menu.pdfUrl && (
+                  <a
+                    className="pdf-button"
+                    href={menu.pdfUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <FaFilePdf />
+                    Ver menú completo
+                  </a>
+                )}
               </div>
             </div>
 
-            <div className="menu-items-grid">
-              {(menu.items || []).map(
-                (item, index) => (
-                  <MenuItem
-                    key={index}
-                    item={item}
-                  />
-                )
-              )}
-            </div>
+            <MenuGallery images={menu.images} />
 
-            <div className="menu-whatsapp">
-              <div>
-                <h3>¿Quieres pedir este menú?</h3>
-                <p>
-                  Escríbenos por WhatsApp para
-                  realizar tu pedido.
-                </p>
-              </div>
-
-              <WhatsAppButton
-                text="Pedir por WhatsApp"
-                message={`Hola, quiero pedir el menú del día de ${APP_CONFIG.businessName}.`}
-              />
-            </div>
+            <MenuBuilder menu={menu} />
           </section>
         )}
       </main>
@@ -643,7 +707,7 @@ function MenuItem({ item }) {
    RESERVAS CLIENTE
 ========================================================= */
 
-function Booking({ navigate }) {
+function Booking({ navigate, user }) {
   const [form, setForm] = useState({
     clientName: "",
     clientPhone: "",
@@ -778,7 +842,7 @@ function Booking({ navigate }) {
 
   return (
     <div className="page">
-      <Header navigate={navigate} />
+      <Header navigate={navigate} user={user} />
 
       <main className="content-page">
         <div className="page-title">
@@ -1519,15 +1583,61 @@ function MenuManager({ ownerId }) {
   const [editingItem, setEditingItem] =
     useState(null);
 
-  const emptyMenu = {
-    title: "Menú del día",
-    subtitle: "",
-    availableUntil: "15:00",
-    items: []
-  };
+  function menuToForm(menu) {
+    if (!menu) {
+      return {
+        title: "Menú del día",
+        subtitle: "",
+        availableUntil: "15:00",
+        items: [],
+        pdfUrl: "",
+        pdfName: "",
+        pdfSource: "",
+        pdfPublicId: "",
+        categories: emptyCategories(),
+        images: []
+      };
+    }
 
-  const [form, setForm] =
-    useState(emptyMenu);
+    const items = Array.isArray(menu.items)
+      ? menu.items
+      : [];
+
+    return {
+      title:
+        menu.title || "Menú del día",
+
+      subtitle:
+        menu.subtitle || "",
+
+      availableUntil:
+        menu.availableUntil || "15:00",
+
+      /* Productos del editor clásico, sin opciones configurables. */
+      items: items.filter(
+        (item) => !isCustomCategory(item)
+      ),
+
+      pdfUrl: menu.pdfUrl || "",
+      pdfName: menu.pdfName || "",
+      pdfSource: menu.pdfSource || "",
+      pdfPublicId: menu.pdfPublicId || "",
+
+      images: Array.isArray(menu.images)
+        ? menu.images
+        : [],
+
+      /* Las opciones se reconstruyen desde items. */
+      categories: normalizeCategories(
+        menu.categories,
+        items
+      )
+    };
+  }
+
+  const [form, setForm] = useState(
+    menuToForm(null)
+  );
 
   useEffect(() => {
     loadMenus();
@@ -1542,25 +1652,11 @@ function MenuManager({ ownerId }) {
 
       setMenus(data);
 
-      const todayMenu =
-        data[getToday()];
+      const currentMenu =
+        data[selectedDate];
 
-      if (todayMenu) {
-        setForm({
-          title:
-            todayMenu.title ||
-            "Menú del día",
-
-          subtitle:
-            todayMenu.subtitle || "",
-
-          availableUntil:
-            todayMenu.availableUntil ||
-            "15:00",
-
-          items:
-            todayMenu.items || []
-        });
+      if (currentMenu) {
+        setForm(menuToForm(currentMenu));
       }
     } catch (error) {
       console.error(error);
@@ -1574,30 +1670,10 @@ function MenuManager({ ownerId }) {
   }
 
   function selectDate(date) {
+    if (!date) return;
+
     setSelectedDate(date);
-
-    const menu = menus[date];
-
-    if (menu) {
-      setForm({
-        title:
-          menu.title ||
-          "Menú del día",
-
-        subtitle:
-          menu.subtitle || "",
-
-        availableUntil:
-          menu.availableUntil ||
-          "15:00",
-
-        items:
-          menu.items || []
-      });
-    } else {
-      setForm(emptyMenu);
-    }
-
+    setForm(menuToForm(menus[date]));
     setEditingItem(null);
   }
 
@@ -1706,6 +1782,18 @@ function MenuManager({ ownerId }) {
     setSaving(true);
 
     try {
+      const categories = normalizeCategories(
+        form.categories,
+        form.items
+      );
+
+      const legacyItems = (form.items || []).filter(
+        (item) => !isCustomCategory(item)
+      );
+
+      const customItems =
+        categoriesToItems(categories);
+
       await saveMenu(
         ownerId,
         {
@@ -1726,8 +1814,19 @@ function MenuManager({ ownerId }) {
             form.availableUntil ||
             "15:00",
 
-          items:
-            form.items || []
+          /* Las opciones se guardan dentro de items. */
+          items: [...legacyItems, ...customItems],
+
+          pdfUrl: form.pdfUrl || "",
+          pdfName: form.pdfName || "",
+          pdfSource: form.pdfSource || "",
+          pdfPublicId: form.pdfPublicId || "",
+
+          images: Array.isArray(form.images)
+            ? form.images
+            : [],
+
+          categories
         }
       );
 
@@ -1773,7 +1872,7 @@ function MenuManager({ ownerId }) {
 
       await loadMenus();
 
-      setForm(emptyMenu);
+      setForm(menuToForm(null));
     } catch (error) {
       console.error(error);
 
@@ -1782,6 +1881,90 @@ function MenuManager({ ownerId }) {
           "No se pudo eliminar el menú."
       );
     }
+  }
+
+  async function handleClearPdf() {
+    const menu = menus[selectedDate];
+
+    if (menu?.id) {
+      await clearMenuPdf(ownerId, menu.id);
+    }
+
+    setForm((previous) => ({
+      ...previous,
+      pdfUrl: "",
+      pdfName: "",
+      pdfSource: "",
+      pdfPublicId: ""
+    }));
+
+    setMenus((previous) => ({
+      ...previous,
+      [selectedDate]: {
+        ...previous[selectedDate],
+        pdfUrl: "",
+        pdfName: "",
+        pdfSource: "",
+        pdfPublicId: ""
+      }
+    }));
+  }
+
+  async function handleAddImage(image) {
+    const menu = menus[selectedDate];
+
+    if (menu?.id) {
+      await addMenuImage(ownerId, menu.id, image);
+    }
+
+    setForm((previous) => ({
+      ...previous,
+      images: [...(previous.images || []), image]
+    }));
+
+    setMenus((previous) => ({
+      ...previous,
+      [selectedDate]: {
+        ...previous[selectedDate],
+        images: [
+          ...(previous[selectedDate]?.images || []),
+          image
+        ]
+      }
+    }));
+  }
+
+  async function handleRemoveImage(removedImage) {
+    const menu = menus[selectedDate];
+
+    if (menu?.id) {
+      await removeMenuImage(
+        ownerId,
+        menu.id,
+        removedImage
+      );
+    }
+
+    setForm((previous) => ({
+      ...previous,
+      images: (previous.images || []).filter(
+        (image) =>
+          image.id !== removedImage.id
+      )
+    }));
+
+    setMenus((previous) => ({
+      ...previous,
+      [selectedDate]: {
+        ...previous[selectedDate],
+        images: (
+          previous[selectedDate]?.images || []
+        ).filter(
+          (image) =>
+            image.id !== removedImage.id
+        )
+      }
+    }));
   }
 
   const menuDates = Object.keys(menus)
@@ -1917,6 +2100,17 @@ function MenuManager({ ownerId }) {
             <div className="editor-card">
               <div className="form-grid">
                 <FormField
+                  label="Fecha del menú"
+                  name="menuDate"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(event) =>
+                    selectDate(event.target.value)
+                  }
+                  icon={<FaCalendarAlt />}
+                />
+
+                <FormField
                   label="Título"
                   name="title"
                   value={form.title}
@@ -1959,6 +2153,14 @@ function MenuManager({ ownerId }) {
                 </div>
               </label>
             </div>
+
+            <AdminMenuExtras
+              form={form}
+              setForm={setForm}
+              onClearPdf={handleClearPdf}
+              onAddImage={handleAddImage}
+              onRemoveImage={handleRemoveImage}
+            />
 
             <div className="editor-card">
               <div className="editor-card-heading">

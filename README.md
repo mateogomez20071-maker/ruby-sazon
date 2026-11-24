@@ -20,7 +20,7 @@ La emprendedora tiene en su panel:
 8. Eliminar productos.
 9. Guardar el menú.
 
-En esta versión el comportamiento se simula con `localStorage` para poder desarrollar el frontend sin depender todavía de Firebase.
+Los menús y las reservas se guardan en Cloud Firestore. El menú público se consulta con `VITE_OWNER_ID` y la fecha elegida.
 
 ## Stack
 
@@ -141,3 +141,87 @@ dist
 Agregar las variables de `.env.example` en las variables de entorno de Netlify.
 
 El archivo `public/_redirects` permite que las rutas de React funcionen al refrescar la página.
+
+## Menú en PDF y categorías
+
+La emprendedora puede, para cada fecha:
+
+- Editar título, descripción y hora límite (como antes).
+- Elegir la fecha con el campo “Fecha del menú”.
+- Subir un PDF a Cloudinary o pegar un enlace externo.
+- Reemplazar o quitar el PDF cuando lo necesite.
+- Administrar opciones en **Arroces**, **Ensaladas** y **Proteínas**:
+  agregar, editar, eliminar y activar/desactivar.
+
+El cliente ve el botón **Ver menú completo** (si hay PDF) y la sección
+**Arma tu menú** con buscador en tiempo real, selección por categoría,
+resumen y envío por WhatsApp con la fecha y las opciones elegidas.
+Los menús antiguos que usaban `items` siguen mostrándose como “Platos incluidos”.
+
+### Nuevas variables de entorno
+
+```text
+VITE_OWNER_ID=UID_DE_LA_EMPRENDEDORA
+VITE_CLOUDINARY_CLOUD_NAME=
+VITE_CLOUDINARY_UPLOAD_PRESET=
+```
+
+El `upload preset` debe ser **unsigned** y con la opción **Overwrite** activada
+para poder reemplazar PDFs con el mismo `public_id`. Nunca usar el API Secret
+en el frontend.
+
+La subida es directa desde el navegador: solo se envían `file`, `upload_preset`,
+`folder` y (si aplica) `public_id`. No se envían parámetros firmados.
+
+**Importante para planes Free de Cloudinary:** activar
+*Settings → Security → Allow delivery of PDF and ZIP files*. Sin esa opción la
+subida funciona y se guarda la URL, pero al abrir el PDF Cloudinary responde
+401 “deny or ACL failure”.
+
+`VITE_CLOUDINARY_IMAGE_UPLOAD_PRESET` es opcional: si se deja vacío se usa el
+mismo preset de menús. Las imágenes se guardan en `sazon-oculta/images`.
+
+### Acceso al panel
+
+El botón **Panel** de la navegación siempre lleva a `/login` si no hay sesión
+de Firebase Auth y a `/admin` si la hay. Las rutas `/admin`, `/admin/menu` y
+`/admin/reservas` redirigen a `/login` cuando no existe sesión válida.
+
+### Estructura ampliada de `dailyMenus/{menuId}`
+
+```text
+ownerId
+date
+title
+subtitle
+availableUntil
+items              <- se conserva para menús antiguos
+pdfUrl
+pdfName
+pdfSource          <- "cloudinary" | "external" | ""
+pdfPublicId
+categories:
+  arroces:    [{ id, name, description, price, available }]
+  ensaladas:  [{ id, name, description, price, available }]
+  proteinas:  [{ id, name, description, price, available }]
+updatedAt
+```
+
+El PDF se guarda en Cloudinary (carpetas `sazon-oculta/menus` y
+`sazon-oculta/images`), nunca dentro de Firestore.
+
+### Reglas de Firestore
+
+`firestore.rules` permite lectura pública de `dailyMenus` (necesario para el
+menú del cliente) y restringe escrituras a `ownerId == request.auth.uid`.
+Se pueden aplicar con Firebase CLI:
+
+```bash
+firebase deploy --only firestore:rules
+```
+
+### Imágenes
+
+`src/services/cloudinary.js` incluye `uploadImage()` preparado para las
+imágenes reales que se integrarán más adelante. No se ha agregado ninguna
+imagen inventada.
