@@ -179,7 +179,7 @@ subida funciona y se guarda la URL, pero al abrir el PDF Cloudinary responde
 401 “deny or ACL failure”.
 
 `VITE_CLOUDINARY_IMAGE_UPLOAD_PRESET` es opcional: si se deja vacío se usa el
-mismo preset de menús. Las imágenes se guardan en `sazon-oculta/images`.
+mismo preset de menús. Las imágenes se guardan en `images`.
 
 ### Acceso al panel
 
@@ -207,8 +207,8 @@ categories:
 updatedAt
 ```
 
-El PDF se guarda en Cloudinary (carpetas `sazon-oculta/menus` y
-`sazon-oculta/images`), nunca dentro de Firestore.
+El PDF se guarda en Cloudinary (carpetas `menus` y
+`images`), nunca dentro de Firestore.
 
 ### Reglas de Firestore
 

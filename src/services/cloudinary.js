@@ -21,8 +21,8 @@ const IMAGE_PRESET =
   PDF_PRESET;
 
 const FOLDERS = {
-  pdf: "sazon-oculta/menus",
-  image: "sazon-oculta/images"
+  pdf: "menus",
+  image: "images"
 };
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
