@@ -34,9 +34,9 @@ function formatPrice(price) {
 
 function emptySelections() {
   return {
-    arroces: null,
-    ensaladas: null,
-    proteinas: null
+    arroces: [],
+    ensaladas: [],
+    proteinas: []
   };
 }
 
@@ -84,33 +84,58 @@ export default function MenuBuilder({ menu }) {
   }
 
   function toggleOption(categoryKey, option) {
-    setSelections((previous) => ({
-      ...previous,
-      [categoryKey]:
-        previous[categoryKey]?.id === option.id
-          ? null
-          : option
-    }));
+    setSelections((previous) => {
+      const current = Array.isArray(
+        previous[categoryKey]
+      )
+        ? previous[categoryKey]
+        : [];
+
+      const alreadySelected = current.some(
+        (item) => item.id === option.id
+      );
+
+      return {
+        ...previous,
+        [categoryKey]: alreadySelected
+          ? current.filter(
+              (item) => item.id !== option.id
+            )
+          : [...current, option]
+      };
+    });
   }
 
-  const selectedLines = CATEGORIES.map(
+  const selectedGroups = CATEGORIES.map(
     (category) => ({
       ...category,
-      option: selections[category.key]
+      options: Array.isArray(
+        selections[category.key]
+      )
+        ? selections[category.key]
+        : []
     })
-  ).filter((line) => line.option);
+  ).filter((group) => group.options.length > 0);
+
+  const selectedCount = selectedGroups.reduce(
+    (total, group) => total + group.options.length,
+    0
+  );
 
   const message = [
     "Hola, quiero hacer un pedido:",
     "",
     `📅 Fecha: ${formatDate(menu?.date)}`,
     "",
-    ...selectedLines.map(
-      (line) =>
-        `${line.emoji} ${line.singular}: ${line.option.name}`
-    ),
+    ...selectedGroups.flatMap((group) => [
+      `${group.emoji} ${group.label}:`,
+      ...group.options.map(
+        (option) => `   • ${option.name}`
+      ),
+      ""
+    ]),
     ...(note.trim()
-      ? ["", `📝 Nota: ${note.trim()}`]
+      ? [`📝 Nota: ${note.trim()}`]
       : [])
   ].join("\n");
 
@@ -133,7 +158,7 @@ export default function MenuBuilder({ menu }) {
         <span>Personaliza tu pedido</span>
         <h2>Arma tu menú</h2>
         <p>
-          Elige una opción de cada categoría y envíanos
+          Elige tus opciones de cada categoría y envíanos
           tu combinación por WhatsApp.
         </p>
       </div>
@@ -205,9 +230,11 @@ export default function MenuBuilder({ menu }) {
                     const available =
                       option.available !== false;
 
-                    const selected =
-                      selections[category.key]?.id ===
-                      option.id;
+                    const selected = (
+                      selections[category.key] || []
+                    ).some(
+                      (item) => item.id === option.id
+                    );
 
                     const price = formatPrice(
                       option.price
@@ -290,29 +317,36 @@ export default function MenuBuilder({ menu }) {
           </div>
         </div>
 
-        {selectedLines.length === 0 ? (
+        {selectedCount === 0 ? (
           <p className="summary-empty">
             Todavía no elegiste ninguna opción.
           </p>
         ) : (
           <div className="summary-grid">
-            {selectedLines.map((line) => (
+            {selectedGroups.map((group) => (
               <div
                 className="summary-line"
-                key={line.key}
+                key={group.key}
               >
                 <span>
-                  {line.emoji} {line.singular}
+                  {group.emoji} {group.label}
                 </span>
 
-                <div>
-                  <strong>{line.option.name}</strong>
+                <div className="summary-options">
+                  {group.options.map((option) => (
+                    <div
+                      className="summary-option"
+                      key={option.id}
+                    >
+                      <strong>{option.name}</strong>
 
-                  {formatPrice(line.option.price) && (
-                    <small>
-                      {formatPrice(line.option.price)}
-                    </small>
-                  )}
+                      {formatPrice(option.price) && (
+                        <small>
+                          {formatPrice(option.price)}
+                        </small>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}
@@ -337,13 +371,13 @@ export default function MenuBuilder({ menu }) {
             className="whatsapp-button"
             type="button"
             onClick={openWhatsApp}
-            disabled={selectedLines.length === 0}
+            disabled={selectedCount === 0}
           >
             <FaWhatsapp />
             Pedir por WhatsApp
           </button>
 
-          {selectedLines.length === 0 && (
+          {selectedCount === 0 && (
             <span>
               Elige al menos una opción para pedir.
             </span>
